@@ -163,9 +163,15 @@ export default function Home() {
       body: compact
     });
 
-    const data = await response.json() as { error?: string; image: string };
+    const data = await response.json() as {
+      error?: string;
+      image: string;
+    };
 
-    if (!response.ok) throw Error(data.error || 'Falha no envio da imagem.');
+    if (!response.ok) {
+      throw Error(data.error || 'Falha no envio da imagem.');
+    }
+
     return data.image;
   }
 
@@ -287,7 +293,7 @@ export default function Home() {
             aria-current={view === 'board' ? 'page' : undefined}
             onClick={() => navigate('board')}
           >
-            <ArrowLeft size={15} /> Tela inicial
+            <ArrowLeft size={15} /> Visualizar PTs
           </button>
 
           <button
@@ -393,7 +399,7 @@ export default function Home() {
                 ))}
               </div>
 
-              {p.owner && (
+              {admin && (
                 <div className="actions">
                   <button
                     disabled={busy}
@@ -405,19 +411,15 @@ export default function Home() {
                     <Plus size={15} /> Adicionar PT
                   </button>
                   <button
-                    disabled={busy || !activeParty}
-                    onClick={async () => {
-                      if (!activeParty) return;
-                      if (!confirm(
-                        'Completar esta PT com as 7 funções da referência e adicionar a composição da Party 2? As vagas existentes serão mantidas.'
-                      )) return;
-
-                      if (await act({ type: 'party-reference', party: activeParty })) {
-                        setParty(activeParty);
-                      }
+                    type="button"
+                    disabled={busy || !activeParty || rows.length >= MAX_PARTY_SLOTS}
+                    onClick={() => {
+                      setSelected('__new__');
+                      setView('admin');
+                      setTab('builds');
                     }}
                   >
-                    Adicionar composição das imagens
+                    <Plus size={15} /> Adicionar função
                   </button>
                 </div>
               )}
@@ -439,7 +441,7 @@ export default function Home() {
                     <th>Jogador</th>
                     <th>Vaga</th>
                     <th>OK</th>
-                    {p.owner && <th>Ações</th>}
+                    {admin && <th>Ações</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -485,7 +487,7 @@ export default function Home() {
                           ? <Check className="green" size={17} />
                           : <span className="muted">—</span>}
                       </td>
-                      {p.owner && (
+                      {admin && (
                         <td>
                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                             <button className="small" onClick={() => openAdmin(b.id)}>
@@ -510,6 +512,7 @@ export default function Home() {
                   ))}
                 </tbody>
               </table>
+
               {!g.builds.length && (
                 <div className="empty">
                   Nenhuma build cadastrada. Use Adicionar PT para começar.
@@ -521,7 +524,7 @@ export default function Home() {
               <span>
                 {pieces.map((code, i) => code + ' ' + pieceNames[i]).join(' · ')}
               </span>
-              <span>Distribuição exclusiva do dono</span>
+              <span>Distribuição pela staff e pelo dono</span>
             </div>
           </>
         )}
@@ -533,12 +536,24 @@ export default function Home() {
                 <span className="eyebrow">CONVOCAÇÃO / PING</span>
                 <h1>Qual é a sua função?</h1>
                 <p className="muted">
-                  Escolha suas preferências. O dono define sua vaga na composição.
+                  Escolha suas preferências. A staff define sua vaga na composição.
                 </p>
               </div>
             </div>
+
             {snapshot.me ? (
-              <SignupForm guild={g} me={snapshot.me.id} act={act} busy={busy} />
+              <>
+                <SignupForm guild={g} me={snapshot.me.id} act={act} busy={busy} />
+                {g.signups.some(s => s.id === snapshot.me?.id) && (
+                  <button
+                    className="primary"
+                    type="button"
+                    onClick={() => navigate('board')}
+                  >
+                    <Users size={15} /> Visualizar PTs
+                  </button>
+                )}
+              </>
             ) : (
               <div className="panel">
                 <h2>Identifique-se para responder</h2>
@@ -576,7 +591,7 @@ export default function Home() {
               {[
                 ['roster', 'PTs e players', Users],
                 ['ping', 'Convocação', Users],
-                ...(p.editBuilds ? [['builds', 'Builds e imagens', ImagePlus]] : []),
+                ...(admin ? [['builds', 'Builds e imagens', ImagePlus]] : []),
                 ...(p.owner
                   ? [
                       ['settings', 'Visualização', Settings],
@@ -598,7 +613,7 @@ export default function Home() {
             </nav>
 
             {tab === 'roster' && (
-              p.owner ? (
+              admin ? (
                 <Allocation
                   guild={g}
                   initial={selected}
@@ -611,7 +626,7 @@ export default function Home() {
                 />
               ) : (
                 <div className="panel">
-                  <h2>Distribuição exclusiva do dono</h2>
+                  <h2>Distribuição pela staff e pelo dono</h2>
                   <p className="muted">
                     Consulte a convocação e edite os sets se sua conta tiver essa permissão.
                   </p>
@@ -622,7 +637,7 @@ export default function Home() {
             {tab === 'ping' && (
               <Ping
                 guild={g}
-                owner={p.owner}
+                owner={admin}
                 act={act}
                 busy={busy}
                 onAssign={signup => {
@@ -635,11 +650,13 @@ export default function Home() {
               />
             )}
 
-            {tab === 'builds' && p.editBuilds && (
+            {tab === 'builds' && admin && (
               <BuildEditor
+                key={selected + ':' + (activeParty || 'Party 1')}
+                defaultParty={activeParty || 'Party 1'}
                 guild={g}
                 initial={selected}
-                owner={p.owner}
+                owner={admin}
                 act={act}
                 busy={busy}
                 upload={upload}
@@ -670,7 +687,7 @@ export default function Home() {
         </span>
       </footer>
 
-      {p.owner && creatingParty && (
+      {admin && creatingParty && (
         <CreateParty
           guild={g}
           act={act}
@@ -684,7 +701,7 @@ export default function Home() {
         />
       )}
 
-      {p.owner && movingBuild && (
+      {admin && movingBuild && (
         <MovePlayer
           key={movingBuild.id}
           guild={g}
@@ -995,6 +1012,7 @@ function SignupForm({
             ? (existing ? 'Atualizar inscrição' : 'Confirmar inscrição')
             : 'Convocação fechada'}
         </button>
+
         {existing && (
           <button
             type="button"
@@ -1008,7 +1026,7 @@ function SignupForm({
 
       <div className="panel signup-aside">
         <Users size={28} />
-        <h2>Você escolhe as preferências.<br />O dono monta a PT.</h2>
+        <h2>Você escolhe as preferências.<br />A staff monta a PT.</h2>
         <p className="muted">
           Sua inscrição aparece na convocação. Nenhuma vaga é ocupada automaticamente.
         </p>
@@ -1299,10 +1317,11 @@ function Ping({
 }
 
 function BuildEditor({
-  guild: g, initial, owner, act, busy, upload, onError
+  guild: g, initial, defaultParty, owner, act, busy, upload, onError
 }: {
   guild: Guild;
   initial: string;
+  defaultParty: string;
   owner: boolean;
   act: Action;
   busy: boolean;
@@ -1310,7 +1329,11 @@ function BuildEditor({
   onError: (s: string) => void;
 }) {
   const [id, setId] = useState(
-    g.builds.some(b => b.id === initial) ? initial : g.builds[0]?.id || ''
+    initial === '__new__'
+      ? ''
+      : g.builds.some(b => b.id === initial)
+        ? initial
+        : g.builds.find(b => b.party === defaultParty)?.id || ''
   );
   const [draft, setDraft] = useState<Build | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -1319,7 +1342,7 @@ function BuildEditor({
     id: '',
     name: '',
     role: '',
-    party: g.builds[0]?.party || 'Party 1',
+    party: defaultParty,
     color: '#5689bc',
     gear: pieces.map(() => ({ name: '', image: '' })),
     instructions: '',
@@ -1329,10 +1352,21 @@ function BuildEditor({
   });
 
   useEffect(() => {
-    setDraft(structuredClone(g.builds.find(b => b.id === id) || blank()));
+    setDraft(current => structuredClone(
+      g.builds.find(b => b.id === id) || {
+        ...blank(),
+        party: current?.party || defaultParty
+      }
+    ));
   }, [id]);
 
   if (!draft) return null;
+
+  const count = g.builds.filter(b =>
+    b.id !== draft.id &&
+    b.party.trim().toLowerCase() === draft.party.trim().toLowerCase()
+  ).length;
+  const full = count >= MAX_PARTY_SLOTS;
 
   const change = (key: keyof Build, value: unknown) =>
     setDraft({ ...draft, [key]: value });
@@ -1357,10 +1391,14 @@ function BuildEditor({
           </p>
         </div>
         {owner && (
-          <button onClick={() => {
-            setId('');
-            setDraft(blank());
-          }}>
+          <button
+            type="button"
+            disabled={busy || uploading}
+            onClick={() => {
+              setId('');
+              setDraft({ ...blank(), party: draft.party });
+            }}
+          >
             <Plus size={15} /> Nova build / vaga
           </button>
         )}
@@ -1380,8 +1418,18 @@ function BuildEditor({
 
       <form onSubmit={async e => {
         e.preventDefault();
+
+        if (busy || uploading) return;
+
+        if (full) {
+          onError('Esta PT já possui 20 funções. Escolha outra PT.');
+          return;
+        }
+
         if (await act({ type: 'build-save', build: draft })) {
-          setDraft(id ? { ...draft } : blank());
+          setDraft(
+            id ? { ...draft } : { ...blank(), party: draft.party }
+          );
         }
       }}>
         <div className="form-grid">
@@ -1496,8 +1544,18 @@ function BuildEditor({
           />
         </label>
 
+        <p className="muted">
+          {draft.party}: {count + (draft.id ? 1 : 0)} / {MAX_PARTY_SLOTS} funções salvas.
+        </p>
+
+        {full && (
+          <p role="alert" className="error">
+            Esta PT já possui 20 funções. Escolha outra PT.
+          </p>
+        )}
+
         <div className="actions">
-          <button className="primary" disabled={busy || uploading}>
+          <button className="primary" disabled={busy || uploading || full}>
             {uploading ? 'Enviando imagem…' : 'Salvar build e imagens'}
           </button>
           {id && owner && (
@@ -1660,20 +1718,19 @@ function Staff({
   busy: boolean;
 }) {
   const [discordId, setDiscordId] = useState('');
-  const [edit, setEdit] = useState(true);
 
   return (
     <div className="admin-grid">
       <form className="panel" onSubmit={async e => {
         e.preventDefault();
-        if (await act({ type: 'staff-save', discordId, editBuilds: edit })) {
+        if (await act({ type: 'staff-save', discordId, editBuilds: true })) {
           setDiscordId('');
         }
       }}>
         <h2>Autorizar staff</h2>
         <p className="muted">
           Use o ID da conta do Discord com a qual a pessoa entra.
-          A distribuição dos players continua exclusiva do dono.
+          A staff pode adicionar funções, editar builds e distribuir players.
         </p>
         <label>
           ID do Discord
@@ -1685,15 +1742,9 @@ function Staff({
             onChange={e => setDiscordId(e.target.value)}
           />
         </label>
-        <label className="check-label">
-          <input
-            type="checkbox"
-            checked={edit}
-            onChange={e => setEdit(e.target.checked)}
-          />
-          Pode editar nomes de builds, sets e imagens
-        </label>
-        <button className="primary" disabled={busy}>Salvar permissão</button>
+        <button className="primary" disabled={busy}>
+          Salvar permissão
+        </button>
       </form>
 
       <div className="panel">
@@ -1702,9 +1753,7 @@ function Staff({
           <div className="staff-row" key={s.discordId}>
             <div>
               <strong>{s.discordId}</strong>
-              <small>
-                {s.editBuilds ? 'Edita builds e imagens' : 'Consulta convocação'}
-              </small>
+              <small>Gerencia PTs, funções, builds e players</small>
             </div>
             <button
               className="danger small"
@@ -1720,7 +1769,7 @@ function Staff({
         )}
         <p className="muted">
           A staff também precisa pertencer ao servidor e possuir o cargo Membro.
-          Só o dono distribui os players.
+          A staff pode gerenciar as PTs, funções e players.
         </p>
       </div>
     </div>
