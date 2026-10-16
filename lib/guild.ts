@@ -1,4 +1,7 @@
-export const pieces = ['AR', 'MS', 'CA', 'PE', 'BO', 'CP', 'CO', 'PO', 'MO'] as const;
+export const pieces = [
+  'AR', 'MS', 'CA', 'PE', 'BO', 'CP', 'CO', 'PO', 'MO'
+] as const;
+
 export const pieceNames = [
   'Arma', 'Mão secundária', 'Capacete', 'Peitoral', 'Botas',
   'Capa', 'Comida', 'Poção', 'Montaria'
@@ -79,7 +82,7 @@ export function permissions(g: Guild, u: Actor | null) {
   return {
     owner,
     staff: !!staff,
-    editBuilds: owner || !!staff?.editBuilds
+    editBuilds: owner || !!staff
   };
 }
 
@@ -165,7 +168,7 @@ export function seed(owner: string): Guild {
       event: 'Território',
       departure: 'Hideout de Marsh',
       time: '',
-      notice: 'Confira seu set e aguarde a distribuição da PT pelo dono.',
+      notice: 'Confira seu set e aguarde a distribuição da PT pela staff.',
       accent: '#edc76b',
       logo: '',
       signupOpen: true
@@ -187,67 +190,6 @@ export function seed(owner: string): Guild {
   };
 }
 
-export const extraParty1: [string, string, string][] = [
-  ['DPS', 'Arco Longo 8.1', '#ff9900'],
-  ['DPS', 'Arco Longo 8.1', '#ff9900'],
-  ['DPS', 'Cravadas 8.1', '#ff9900'],
-  ['Beam Healer', 'Queda-Santa', '#31c96b'],
-  ['Beam Healer', 'Queda-Santa', '#31c96b'],
-  ['Brisa Heal', 'Vassoura', '#31c96b'],
-  ['Peel Healer', 'Exaltado', '#31c96b']
-];
-
-export const templateParty2: [string, string, string][] = [
-  ['LOOTER', 'Looter', '#5689bc'],
-  ['Stopper', 'Maça Pesada', '#5689bc'],
-  ['Stopper', 'SOB ou Martelo', '#5689bc'],
-  ['Defender Clap', 'Arborito', '#c5b459'],
-  ['Debuff', 'Danação T8', '#a386c2'],
-  ['Battlemount', 'Bastião de Cristal', '#a386c2'],
-  ['DPS', 'Arco Longo 8.1', '#ff9900'],
-  ['DPS', 'DPS PRESS', '#ff9900'],
-  ['DPS', 'DPS PRESS', '#ff9900'],
-  ['Beam Healer', 'Queda-Santa', '#31c96b'],
-  ['Beam Healer', 'Queda-Santa', '#31c96b']
-];
-
-function addTemplate(
-  g: Guild,
-  party: string,
-  entries: [string, string, string][]
-) {
-  const required = new Map<string, number>();
-
-  for (const [role, name, buildColor] of entries) {
-    const key = JSON.stringify([role, name]);
-    const count = (required.get(key) || 0) + 1;
-    required.set(key, count);
-
-    const existing = g.builds.filter(
-      b => b.party === party && b.role === role && b.name === name
-    ).length;
-
-    if (existing >= count) continue;
-
-    const source = g.builds.find(b => b.name === name);
-
-    g.builds.push({
-      id: crypto.randomUUID(),
-      party,
-      role,
-      name,
-      color: buildColor,
-      gear: source
-        ? structuredClone(source.gear)
-        : pieces.map(() => ({ name: '', image: '' })),
-      instructions: source?.instructions || '',
-      player: '',
-      signupId: '',
-      confirmed: false
-    });
-  }
-}
-
 export function applyCommand(
   original: Guild,
   c: Command,
@@ -258,7 +200,19 @@ export function applyCommand(
 
   const own = () => {
     if (!p.owner) {
-      throw new GuildError('Somente o dono pode realizar esta alteração.', 403);
+      throw new GuildError(
+        'Somente o dono pode realizar esta alteração.',
+        403
+      );
+    }
+  };
+
+  const manage = () => {
+    if (!p.owner && !p.staff) {
+      throw new GuildError(
+        'Somente a staff e o dono podem alterar as PTs.',
+        403
+      );
     }
   };
 
@@ -280,7 +234,7 @@ export function applyCommand(
 
   switch (c.type) {
     case 'party-create': {
-      own();
+      manage();
 
       const name = str(c.name, 60, true);
 
@@ -327,31 +281,6 @@ export function applyCommand(
       break;
     }
 
-    case 'party-reference': {
-      own();
-
-      const requested = str(c.party, 60, true);
-      const first = g.builds.find(b => b.party === requested)?.party;
-
-      if (!first) {
-        throw new GuildError('Selecione a PT que deseja completar.');
-      }
-
-      if (partyKey(first) === 'party 2') {
-        throw new GuildError('Selecione a primeira PT para completar a composição.');
-      }
-
-      addTemplate(g, first, extraParty1);
-
-      const second =
-        g.builds.find(b => partyKey(b.party) === 'party 2')?.party ||
-        'Party 2';
-
-      addTemplate(g, second, templateParty2);
-      checkLimits(g);
-      break;
-    }
-
     case 'signup': {
       if (!g.config.signupOpen) {
         throw new GuildError('A convocação está fechada.');
@@ -364,12 +293,15 @@ export function applyCommand(
 
       for (const id of [main, secondary, fill]) {
         if (id && !g.builds.some(b => b.id === id)) {
-          throw new GuildError('Uma das builds mudou. Atualize sua escolha.');
+          throw new GuildError(
+            'Uma das builds mudou. Atualize sua escolha.'
+          );
         }
       }
 
       const duplicate = g.signups.find(
-        s => s.id !== user.id && s.name.toLowerCase() === name.toLowerCase()
+        s => s.id !== user.id &&
+          s.name.toLowerCase() === name.toLowerCase()
       );
 
       if (duplicate) {
@@ -401,22 +333,24 @@ export function applyCommand(
       break;
 
     case 'signup-edit': {
-      own();
+      manage();
       const signup = g.signups.find(s => s.id === c.id);
 
-      if (!signup) throw new GuildError('Inscrição não encontrada.');
+      if (!signup) {
+        throw new GuildError('Inscrição não encontrada.');
+      }
 
       signup.name = str(c.name, 60, true);
       break;
     }
 
     case 'signup-delete':
-      own();
+      manage();
       g.signups = g.signups.filter(s => s.id !== c.id);
       break;
 
     case 'assign': {
-      own();
+      manage();
 
       const build = find(c.id);
       const name = str(c.name, 60, true);
@@ -435,7 +369,9 @@ export function applyCommand(
           )
         )
       ) {
-        throw new GuildError('Este player já está em uma vaga. Use Mover player.');
+        throw new GuildError(
+          'Este player já está em uma vaga. Use Mover player.'
+        );
       }
 
       build.player = name;
@@ -446,7 +382,7 @@ export function applyCommand(
     }
 
     case 'remove':
-      own();
+      manage();
       Object.assign(find(c.id), {
         player: '',
         signupId: '',
@@ -456,13 +392,15 @@ export function applyCommand(
       break;
 
     case 'move': {
-      own();
+      manage();
 
       const from = find(c.id);
       const to = find(c.to);
 
       if (from.id === to.id || !from.player) {
-        throw new GuildError('Selecione um player e uma vaga diferente.');
+        throw new GuildError(
+          'Selecione um player e uma vaga diferente.'
+        );
       }
 
       if (to.player) {
@@ -487,11 +425,12 @@ export function applyCommand(
     }
 
     case 'confirm': {
-      own();
-
+      manage();
       const build = find(c.id);
 
-      if (!build.player) throw new GuildError('Vaga vazia.');
+      if (!build.player) {
+        throw new GuildError('Vaga vazia.');
+      }
 
       build.confirmed = !!c.value;
       break;
@@ -508,10 +447,6 @@ export function applyCommand(
 
       const existing = g.builds.find(b => b.id === data.id);
 
-      if (!existing && !p.owner) {
-        throw new GuildError('Somente o dono pode criar vagas.', 403);
-      }
-
       if (!Array.isArray(data.gear) || data.gear.length !== 9) {
         throw new GuildError('O set deve ter nove posições.');
       }
@@ -522,20 +457,24 @@ export function applyCommand(
         party: str(data.party, 60, true),
         color: color(data.color),
         instructions: str(data.instructions, 1500),
-        gear: data.gear.map((x: Record<string, unknown>) => ({
-          name: str(x.name, 100),
-          image: img(x.image)
-        }))
+        gear: data.gear.map((x: Record<string, unknown>) => {
+          if (!x || typeof x !== 'object') {
+            throw new GuildError('Equipamento inválido.');
+          }
+
+          return {
+            name: str(x.name, 100),
+            image: img(x.image)
+          };
+        })
       };
 
       const canonical = g.builds.find(
         b => partyKey(b.party) === partyKey(fields.party)
       );
 
-      if (canonical) fields.party = canonical.party;
-
-      if (!p.owner && existing && fields.party !== existing.party) {
-        throw new GuildError('Somente o dono pode mudar a PT de uma build.', 403);
+      if (canonical) {
+        fields.party = canonical.party;
       }
 
       if (existing) {
@@ -555,12 +494,14 @@ export function applyCommand(
     }
 
     case 'build-delete': {
-      own();
+      manage();
 
       const build = find(c.id);
 
       if (build.player) {
-        throw new GuildError('Remova ou mova o player antes de excluir a vaga.');
+        throw new GuildError(
+          'Remova ou mova o player antes de excluir a vaga.'
+        );
       }
 
       g.builds = g.builds.filter(b => b.id !== build.id);
@@ -568,14 +509,26 @@ export function applyCommand(
     }
 
     case 'reorder': {
-      own();
+      manage();
 
-      const i = g.builds.findIndex(b => b.id === c.id);
+      const build = find(c.id);
+      const rows = g.builds.filter(
+        b => partyKey(b.party) === partyKey(build.party)
+      );
+
+      const i = rows.findIndex(b => b.id === build.id);
       const j = i + (c.direction === 'up' ? -1 : 1);
 
-      if (i < 0 || j < 0 || j >= g.builds.length) break;
+      if (j < 0 || j >= rows.length) break;
 
-      [g.builds[i], g.builds[j]] = [g.builds[j], g.builds[i]];
+      const from = g.builds.indexOf(rows[i]);
+      const to = g.builds.indexOf(rows[j]);
+
+      [g.builds[from], g.builds[to]] = [
+        g.builds[to],
+        g.builds[from]
+      ];
+
       break;
     }
 
@@ -584,7 +537,9 @@ export function applyCommand(
 
       const data = c.config as Record<string, unknown>;
 
-      if (!data) throw new GuildError('Configuração inválida.');
+      if (!data) {
+        throw new GuildError('Configuração inválida.');
+      }
 
       g.config = {
         guild: str(data.guild, 60, true),
@@ -618,7 +573,11 @@ export function applyCommand(
       }
 
       g.staff = g.staff.filter(s => s.discordId !== discordId);
-      g.staff.push({ discordId, editBuilds: !!c.editBuilds });
+      g.staff.push({
+        discordId,
+        editBuilds: !!c.editBuilds
+      });
+
       break;
     }
 
@@ -628,7 +587,7 @@ export function applyCommand(
       break;
 
     case 'clear-examples':
-      own();
+      manage();
 
       for (const build of g.builds) {
         if (build.example) {
