@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react';
+import FightHistory from './FightHistory';
 import {
   Swords, Shield, Users, Settings, ImagePlus, ArrowLeft, Plus,
   MoveRight, Trash2, Check, Copy, LogOut, ChevronUp, ChevronDown,
@@ -355,6 +356,15 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {admin && (
+        <FightHistory
+          guild={g}
+          revision={snapshot.revision}
+          busy={busy}
+          act={act}
+        />
+      )}
 
       <main>
         {view === 'board' && (
