@@ -3,7 +3,7 @@ import FightHistory from './FightHistory';
 import {
   Swords, Shield, Users, Settings, ImagePlus, ArrowLeft, Plus,
   MoveRight, Trash2, Check, Copy, LogOut, ChevronUp, ChevronDown,
-  Pencil, X, RefreshCw
+  Pencil, X, RefreshCw, Sun, Moon
 } from 'lucide-react';
 import {
   pieces, pieceNames, MAX_PARTY_SLOTS,
@@ -59,6 +59,26 @@ function GearImage({
 }
 
 export default function Home() {
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      return localStorage.getItem('we-profit-theme') === 'light'
+        ? 'light'
+        : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+
+    try {
+      localStorage.setItem('we-profit-theme', theme);
+    } catch {
+      // O tema continua funcionando sem armazenamento disponível.
+    }
+  }, [theme]);
+
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [view, setView] = useState('board');
   const [tab, setTab] = useState('roster');
@@ -146,7 +166,10 @@ export default function Home() {
     canvas.height = Math.max(1, Math.round(bitmap.height * scale));
 
     const ctx = canvas.getContext('2d');
-    if (!ctx) throw Error('Não foi possível preparar a imagem.');
+
+    if (!ctx) {
+      throw Error('Não foi possível preparar a imagem.');
+    }
 
     ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
@@ -268,24 +291,42 @@ export default function Home() {
   };
 
   return (
-    <div className="app" style={{ '--accent': g.config.accent } as CSSProperties}>
+    <div
+      className="app"
+      style={{ '--accent': g.config.accent } as CSSProperties}
+    >
       <header className="topbar">
-        <a
-          className="brand"
-          href="/"
-          onClick={e => {
-            e.preventDefault();
-            navigate('board');
-          }}
-        >
-          {g.config.logo
-            ? <img src={g.config.logo} alt="Logo da guild" />
-            : <span className="brand-icon"><Swords size={24} /></span>}
-          <span>
-            {g.config.guild}
-            <small>{g.config.subtitle}</small>
-          </span>
-        </a>
+        <div className="brand-group">
+          <a
+            className="brand"
+            href="/"
+            onClick={e => {
+              e.preventDefault();
+              navigate('board');
+            }}
+          >
+            {g.config.logo
+              ? <img src={g.config.logo} alt="Logo da guild" />
+              : <span className="brand-icon"><Swords size={24} /></span>}
+            <span>
+              {g.config.guild}
+              <small>{g.config.subtitle}</small>
+            </span>
+          </a>
+
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() =>
+              setTheme(current => current === 'dark' ? 'light' : 'dark')
+            }
+            aria-label={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'}
+            title={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'}
+          >
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            <span>{theme === 'dark' ? 'Claro' : 'Escuro'}</span>
+          </button>
+        </div>
 
         <nav className="header-actions" aria-label="Menu principal">
           <button
@@ -553,7 +594,12 @@ export default function Home() {
 
             {snapshot.me ? (
               <>
-                <SignupForm guild={g} me={snapshot.me.id} act={act} busy={busy} />
+                <SignupForm
+                  guild={g}
+                  me={snapshot.me.id}
+                  act={act}
+                  busy={busy}
+                />
                 {g.signups.some(s => s.id === snapshot.me?.id) && (
                   <button
                     className="primary"
@@ -610,6 +656,7 @@ export default function Home() {
                   : [])
               ].map(([id, label, Icon]) => {
                 const I = Icon as typeof Users;
+
                 return (
                   <button
                     key={id as string}
@@ -654,7 +701,8 @@ export default function Home() {
                   setSelected(g.builds.find(b => !b.player)?.id || '');
                   setTab('roster');
                   setMessage(
-                    'Selecione ' + signup.name + ' na lista da convocação e escolha a vaga.'
+                    'Selecione ' + signup.name +
+                    ' na lista da convocação e escolha a vaga.'
                   );
                 }}
               />
@@ -737,24 +785,39 @@ export default function Home() {
           >
             <div className="between">
               <div>
-                <span className="eyebrow">{modal.role} / {modal.party}</span>
+                <span className="eyebrow">
+                  {modal.role} / {modal.party}
+                </span>
                 <h2>{modal.name}</h2>
               </div>
-              <button autoFocus aria-label="Fechar set" onClick={() => setDetail(null)}>
+              <button
+                autoFocus
+                aria-label="Fechar set"
+                onClick={() => setDetail(null)}
+              >
                 <X size={18} />
               </button>
             </div>
+
             <div className="set-detail">
               {modal.gear.map((item, i) => (
                 <div key={i}>
                   <GearImage gear={item} index={i} />
                   <strong>{pieceNames[i]}</strong>
-                  <span className="muted">{item.name || 'Não definido'}</span>
+                  <span className="muted">
+                    {item.name || 'Não definido'}
+                  </span>
                 </div>
               ))}
             </div>
-            {modal.instructions && <p className="instructions">{modal.instructions}</p>}
-            <p className="muted">Player: {modal.player || 'Vaga disponível'}</p>
+
+            {modal.instructions && (
+              <p className="instructions">{modal.instructions}</p>
+            )}
+
+            <p className="muted">
+              Player: {modal.player || 'Vaga disponível'}
+            </p>
           </section>
         </div>
       )}
@@ -808,7 +871,11 @@ function CreateParty({
           e.preventDefault();
           if (busy || !name.trim()) return;
 
-          if (await act({ type: 'party-create', name: name.trim(), source })) {
+          if (await act({
+            type: 'party-create',
+            name: name.trim(),
+            source
+          })) {
             onCreated(name.trim());
           }
         }}>
@@ -823,6 +890,7 @@ function CreateParty({
               disabled={busy}
             />
           </label>
+
           <label>
             Composição inicial
             <select
@@ -830,7 +898,9 @@ function CreateParty({
               onChange={e => setSource(e.target.value)}
               disabled={busy}
             >
-              <option value="">Começar com uma vaga para configurar</option>
+              <option value="">
+                Começar com uma vaga para configurar
+              </option>
               {parties.map(party => (
                 <option key={party} value={party}>
                   Copiar builds e imagens de {party}
@@ -844,6 +914,7 @@ function CreateParty({
             Você pode criar quantas PTs precisar.
             Players e confirmações não são copiados.
           </p>
+
           <p className="muted">
             Para escolher suas funções, entre em Administração → Builds e imagens.
           </p>
@@ -902,7 +973,9 @@ function MovePlayer({
         <div className="between">
           <div>
             <span className="eyebrow">DISTRIBUIÇÃO DA PT</span>
-            <h2 id="move-player-title">Mover {source.player || 'player'}</h2>
+            <h2 id="move-player-title">
+              Mover {source.player || 'player'}
+            </h2>
           </div>
           <button aria-label="Fechar" disabled={busy} onClick={onClose}>
             <X size={18} />
@@ -914,7 +987,14 @@ function MovePlayer({
         <form onSubmit={async e => {
           e.preventDefault();
           if (!canMove || busy) return;
-          if (await act({ type: 'move', id: source.id, to: target })) onClose();
+
+          if (await act({
+            type: 'move',
+            id: source.id,
+            to: target
+          })) {
+            onClose();
+          }
         }}>
           <label>
             Para qual vaga?
@@ -936,8 +1016,11 @@ function MovePlayer({
           </label>
 
           {!hasVacancy && (
-            <p className="muted">Não há outra vaga disponível para mover este player.</p>
+            <p className="muted">
+              Não há outra vaga disponível para mover este player.
+            </p>
           )}
+
           {!source.player && (
             <p className="muted">Esta vaga não possui mais um player.</p>
           )}
@@ -945,10 +1028,13 @@ function MovePlayer({
           <p className="muted">
             A vaga anterior ficará disponível. O set permanece na função.
           </p>
+
           {error && <p className="error" role="alert">{error}</p>}
 
           <div className="actions">
-            <button type="button" disabled={busy} onClick={onClose}>Cancelar</button>
+            <button type="button" disabled={busy} onClick={onClose}>
+              Cancelar
+            </button>
             <button className="primary" disabled={busy || !canMove}>
               <MoveRight size={15} />{busy ? 'Movendo…' : 'Mover player'}
             </button>
@@ -1045,7 +1131,9 @@ function SignupForm({
           <p><span>02</span> Selecione as funções que você joga.</p>
           <p><span>03</span> Acompanhe sua vaga no painel da guild.</p>
         </div>
-        {existing && <span className="vacancy available">Inscrição recebida</span>}
+        {existing && (
+          <span className="vacancy available">Inscrição recebida</span>
+        )}
       </div>
     </div>
   );
@@ -1137,7 +1225,12 @@ function Allocation({
           <button
             className="primary"
             disabled={busy || !name.trim()}
-            onClick={() => act({ type: 'assign', id, name, signupId: signup })}
+            onClick={() => act({
+              type: 'assign',
+              id,
+              name,
+              signupId: signup
+            })}
           >
             Salvar nome
           </button>
@@ -1169,7 +1262,9 @@ function Allocation({
         <button
           disabled={busy || !destination || !!destination.player || !b.player}
           onClick={async () => {
-            if (await act({ type: 'move', id, to: target })) setId(target);
+            if (await act({ type: 'move', id, to: target })) {
+              setId(target);
+            }
           }}
         >
           <MoveRight size={15} /> Mover player
@@ -1180,7 +1275,11 @@ function Allocation({
             type="checkbox"
             checked={b.confirmed}
             disabled={busy || !b.player}
-            onChange={e => act({ type: 'confirm', id, value: e.target.checked })}
+            onChange={e => act({
+              type: 'confirm',
+              id,
+              value: e.target.checked
+            })}
           />
           Presença confirmada
         </label>
@@ -1192,7 +1291,9 @@ function Allocation({
           <h2>{b.name}</h2>
           <p className="muted">{b.role} · {b.party}</p>
           <div className="gear-line roomy">
-            {b.gear.map((item, i) => <GearImage key={i} gear={item} index={i} />)}
+            {b.gear.map((item, i) => (
+              <GearImage key={i} gear={item} index={i} />
+            ))}
           </div>
           <button onClick={() => onEdit(id)}>
             <ImagePlus size={15} /> Editar build e imagens
@@ -1209,7 +1310,10 @@ function Allocation({
             <p className="muted">
               Player 1 e Player 2 ajudam a visualizar a composição inicial.
             </p>
-            <button disabled={busy} onClick={() => act({ type: 'clear-examples' })}>
+            <button
+              disabled={busy}
+              onClick={() => act({ type: 'clear-examples' })}
+            >
               Remover somente os exemplos
             </button>
           </div>
@@ -1230,6 +1334,7 @@ function Ping({
 }) {
   const [editing, setEditing] = useState('');
   const [name, setName] = useState('');
+
   const role = (id: string) =>
     g.builds.find(b => b.id === id)?.name || (id ? 'Build removida' : '—');
 
@@ -1268,24 +1373,38 @@ function Ping({
                 <td>{role(s.main)}</td>
                 <td>{role(s.secondary)}</td>
                 <td>{role(s.fill)}</td>
-                <td>{g.builds.find(b => b.signupId === s.id)?.name || 'Aguardando'}</td>
+                <td>
+                  {g.builds.find(b => b.signupId === s.id)?.name || 'Aguardando'}
+                </td>
                 {owner && (
                   <td>
                     <div className="actions">
                       {editing === s.id ? (
                         <>
-                          <button disabled={busy} onClick={async () => {
-                            if (await act({ type: 'signup-edit', id: s.id, name })) {
-                              setEditing('');
-                            }
-                          }}>
+                          <button
+                            disabled={busy}
+                            onClick={async () => {
+                              if (await act({
+                                type: 'signup-edit',
+                                id: s.id,
+                                name
+                              })) {
+                                setEditing('');
+                              }
+                            }}
+                          >
                             Salvar
                           </button>
-                          <button onClick={() => setEditing('')}>Cancelar</button>
+                          <button onClick={() => setEditing('')}>
+                            Cancelar
+                          </button>
                         </>
                       ) : (
                         <>
-                          <button className="small" onClick={() => onAssign(s)}>
+                          <button
+                            className="small"
+                            onClick={() => onAssign(s)}
+                          >
                             Distribuir
                           </button>
                           <button
@@ -1302,7 +1421,10 @@ function Ping({
                             className="small danger"
                             aria-label={'Retirar ' + s.name + ' da convocação'}
                             disabled={busy}
-                            onClick={() => act({ type: 'signup-delete', id: s.id })}
+                            onClick={() => act({
+                              type: 'signup-delete',
+                              id: s.id
+                            })}
                           >
                             <Trash2 size={13} />
                           </button>
@@ -1376,6 +1498,7 @@ function BuildEditor({
     b.id !== draft.id &&
     b.party.trim().toLowerCase() === draft.party.trim().toLowerCase()
   ).length;
+
   const full = count >= MAX_PARTY_SLOTS;
 
   const change = (key: keyof Build, value: unknown) =>
@@ -1452,6 +1575,7 @@ function BuildEditor({
               onChange={e => change('name', e.target.value)}
             />
           </label>
+
           <label>
             Função
             <input
@@ -1462,6 +1586,7 @@ function BuildEditor({
               placeholder="Digite a função que você quiser"
             />
           </label>
+
           <label>
             PT / grupo
             <input
@@ -1477,6 +1602,7 @@ function BuildEditor({
               ))}
             </datalist>
           </label>
+
           <label>
             Cor da função
             <input
@@ -1500,6 +1626,7 @@ function BuildEditor({
                     : <ImagePlus size={22} />}
                 </div>
               </div>
+
               <label>
                 Nome e tier
                 <input
@@ -1509,6 +1636,7 @@ function BuildEditor({
                   onChange={e => gear(i, 'name', e.target.value)}
                 />
               </label>
+
               <label className={'file-button ' + (uploading ? 'disabled' : '')}>
                 <ImagePlus size={14} />
                 {item.image ? 'Trocar imagem' : 'Escolher imagem'}
@@ -1519,17 +1647,22 @@ function BuildEditor({
                   onChange={async e => {
                     const file = e.target.files?.[0];
                     if (!file) return;
+
                     setUploading(true);
+
                     try {
                       gear(i, 'image', await upload(file));
                     } catch (err) {
-                      onError(err instanceof Error ? err.message : 'Falha no envio.');
+                      onError(
+                        err instanceof Error ? err.message : 'Falha no envio.'
+                      );
                     } finally {
                       setUploading(false);
                     }
                   }}
                 />
               </label>
+
               {item.image && (
                 <button
                   className="text-button muted"
@@ -1568,22 +1701,33 @@ function BuildEditor({
           <button className="primary" disabled={busy || uploading || full}>
             {uploading ? 'Enviando imagem…' : 'Salvar build e imagens'}
           </button>
+
           {id && owner && (
             <>
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => act({ type: 'reorder', id, direction: 'up' })}
+                onClick={() => act({
+                  type: 'reorder',
+                  id,
+                  direction: 'up'
+                })}
               >
                 <ChevronUp size={16} /> Subir
               </button>
+
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => act({ type: 'reorder', id, direction: 'down' })}
+                onClick={() => act({
+                  type: 'reorder',
+                  id,
+                  direction: 'down'
+                })}
               >
                 <ChevronDown size={16} /> Descer
               </button>
+
               <button
                 className="danger"
                 type="button"
@@ -1602,6 +1746,7 @@ function BuildEditor({
             </>
           )}
         </div>
+
         <p className="muted">
           PNG, JPG, WebP ou GIF · até 5 MB por imagem.
           As fotos aparecem no tamanho compacto aprovado.
@@ -1655,6 +1800,7 @@ function SettingsForm({
             />
           </label>
         ))}
+
         <label>
           Cor de destaque
           <input
@@ -1676,7 +1822,10 @@ function SettingsForm({
       </label>
 
       <div className="actions">
-        {c.logo && <img className="logo-preview" src={c.logo} alt="Logo da guild" />}
+        {c.logo && (
+          <img className="logo-preview" src={c.logo} alt="Logo da guild" />
+        )}
+
         <label className="file-button">
           <ImagePlus size={15} />{c.logo ? 'Trocar logo' : 'Adicionar logo'}
           <input
@@ -1686,17 +1835,22 @@ function SettingsForm({
             onChange={async e => {
               const file = e.target.files?.[0];
               if (!file) return;
+
               setUploading(true);
+
               try {
                 change('logo', await upload(file));
               } catch (err) {
-                onError(err instanceof Error ? err.message : 'Falha no envio.');
+                onError(
+                  err instanceof Error ? err.message : 'Falha no envio.'
+                );
               } finally {
                 setUploading(false);
               }
             }}
           />
         </label>
+
         {c.logo && (
           <button type="button" onClick={() => change('logo', '')}>
             Remover logo
@@ -1733,15 +1887,22 @@ function Staff({
     <div className="admin-grid">
       <form className="panel" onSubmit={async e => {
         e.preventDefault();
-        if (await act({ type: 'staff-save', discordId, editBuilds: true })) {
+
+        if (await act({
+          type: 'staff-save',
+          discordId,
+          editBuilds: true
+        })) {
           setDiscordId('');
         }
       }}>
         <h2>Autorizar staff</h2>
+
         <p className="muted">
           Use o ID da conta do Discord com a qual a pessoa entra.
           A staff pode adicionar funções, editar builds e distribuir players.
         </p>
+
         <label>
           ID do Discord
           <input
@@ -1752,6 +1913,7 @@ function Staff({
             onChange={e => setDiscordId(e.target.value)}
           />
         </label>
+
         <button className="primary" disabled={busy}>
           Salvar permissão
         </button>
@@ -1759,24 +1921,33 @@ function Staff({
 
       <div className="panel">
         <h2>Staff autorizada</h2>
+
         {g.staff.map(s => (
           <div className="staff-row" key={s.discordId}>
             <div>
               <strong>{s.discordId}</strong>
               <small>Gerencia PTs, funções, builds e players</small>
             </div>
+
             <button
               className="danger small"
               disabled={busy}
-              onClick={() => act({ type: 'staff-delete', discordId: s.discordId })}
+              onClick={() => act({
+                type: 'staff-delete',
+                discordId: s.discordId
+              })}
             >
               Revogar
             </button>
           </div>
         ))}
+
         {!g.staff.length && (
-          <p className="muted">Nenhuma conta de staff autorizada ainda.</p>
+          <p className="muted">
+            Nenhuma conta de staff autorizada ainda.
+          </p>
         )}
+
         <p className="muted">
           A staff também precisa pertencer ao servidor e possuir o cargo Membro.
           A staff pode gerenciar as PTs, funções e players.
