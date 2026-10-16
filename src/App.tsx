@@ -293,7 +293,7 @@ export default function Home() {
             aria-current={view === 'board' ? 'page' : undefined}
             onClick={() => navigate('board')}
           >
-            <ArrowLeft size={15} /> Visualizar PTs
+            <ArrowLeft size={15} /> Tela inicial
           </button>
 
           <button
