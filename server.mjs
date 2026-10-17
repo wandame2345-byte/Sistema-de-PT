@@ -543,6 +543,123 @@ const fightFields = `
   jsonb_array_length(data->'signups') AS signups
 `;
 
+// Ranking disponível para todos os membros autenticados.
+// Cada jogador conta somente uma vez por luta salva.
+app.get('/api/attendance', async (req, res, next) => {
+  try {
+    if (!await state()) {
+      throw fail(400, 'O dono precisa ativar a guild.');
+    }
+
+    const start = req.query.start ? validDate(req.query.start) : null;
+    const end = req.query.end ? validDate(req.query.end) : null;
+
+    if (start && end && start > end) {
+      throw fail(400, 'A data inicial deve ser anterior ou igual à final.');
+    }
+
+    const rows = await pool.query(
+      `SELECT
+        id,
+        title,
+        to_char(fight_date, 'YYYY-MM-DD') AS fight_date,
+        (
+          SELECT coalesce(
+            jsonb_agg(
+              jsonb_build_object(
+                'player', b->>'player',
+                'signupId', b->>'signupId',
+                'party', b->>'party'
+              )
+            ),
+            '[]'::jsonb
+          )
+          FROM jsonb_array_elements(data->'builds') b
+          WHERE btrim(coalesce(b->>'player','')) <> ''
+            AND coalesce(b->>'example','false') <> 'true'
+        ) AS players
+      FROM guild_fights
+      WHERE ($1::date IS NULL OR fight_date >= $1::date)
+        AND ($2::date IS NULL OR fight_date <= $2::date)
+      ORDER BY fight_date DESC, saved_at DESC, id DESC`,
+      [start, end]
+    );
+
+    const people = new Map();
+
+    for (const fight of rows.rows) {
+      const present = new Map();
+
+      for (const b of fight.players) {
+        const name = b.player.trim();
+
+        const key = b.signupId
+          ? 'id:' + b.signupId
+          : 'name:' + name.normalize('NFKC').toLowerCase();
+
+        if (!present.has(key)) {
+          present.set(key, {
+            name,
+            parties: new Set()
+          });
+        }
+
+        present.get(key).parties.add(b.party || 'Sem PT');
+      }
+
+      for (const [key, person] of present) {
+        if (!people.has(key)) {
+          people.set(key, {
+            key,
+            name: person.name,
+            fights: []
+          });
+        }
+
+        people.get(key).fights.push({
+          id: fight.id,
+          title: fight.title,
+          date: fight.fight_date,
+          parties: [...person.parties].sort()
+        });
+      }
+    }
+
+    const ranking = [...people.values()].sort((a, b) =>
+      b.fights.length - a.fights.length ||
+      a.name.localeCompare(b.name, 'pt-BR') ||
+      a.key.localeCompare(b.key)
+    );
+
+    let position = 0;
+    let previous = -1;
+
+    const result = ranking.map((person, index) => {
+      const count = person.fights.length;
+
+      if (count !== previous) {
+        position = index + 1;
+      }
+
+      previous = count;
+
+      return {
+        name: person.name,
+        position,
+        count,
+        fights: person.fights
+      };
+    });
+
+    res.json({
+      totalFights: rows.rows.length,
+      ranking: result
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
 app.get('/api/fights', async (req, res, next) => {
   try {
     const row = await state();
@@ -753,209 +870,4 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
         }
       } else {
         if (c.revision !== row.revision) {
-          throw fail(409, 'Outra alteração foi salva. Atualize e tente novamente.');
-        }
-
-        data = applyCommand(row.data, c, req.actor);
-      }
-
-      await client.query(
-        'UPDATE guild_state SET data=$1,revision=revision+1 WHERE id=1',
-        [data]
-      );
-    }
-
-    await client.query('COMMIT');
-    res.json({ ok: true });
-  } catch (e) {
-    if (client) await client.query('ROLLBACK');
-    next(e);
-  } finally {
-    client?.release();
-  }
-});
-
-app.post('/api/images', express.raw({
-  type: () => true,
-  limit: '1mb'
-}), async (req, res, next) => {
-  try {
-    const row = await state();
-
-    if (!row || !permissions(row.data, req.actor).editBuilds) {
-      throw fail(403, 'Sem permissão para imagens.');
-    }
-
-    const bytes = req.body;
-
-    if (!Buffer.isBuffer(bytes)) throw fail(400, 'Imagem inválida.');
-
-    const sig = bytes.subarray(0, 12).toString('latin1');
-    let type = '';
-
-    if (bytes[0] === 137 && sig.slice(1, 4) === 'PNG') {
-      type = 'image/png';
-    } else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
-      type = 'image/jpeg';
-    } else if (sig.startsWith('GIF87a') || sig.startsWith('GIF89a')) {
-      type = 'image/gif';
-    } else if (sig.startsWith('RIFF') && sig.slice(8, 12) === 'WEBP') {
-      type = 'image/webp';
-    }
-
-    if (!type) throw fail(400, 'Use PNG, JPG, WebP ou GIF.');
-
-    const digest = hash(bytes);
-    const duplicate = (
-      await pool.query('SELECT id FROM guild_images WHERE digest=$1', [digest])
-    ).rows[0];
-
-    if (duplicate) {
-      return res.json({ image: '/api/images/' + duplicate.id });
-    }
-
-    const total = Number((
-      await pool.query(
-        'SELECT coalesce(sum(octet_length(data)),0) AS bytes FROM guild_images'
-      )
-    ).rows[0].bytes);
-
-    if (total + bytes.length > 100 * 1024 * 1024) {
-      throw fail(
-        413,
-        'Limite de 100 MB de imagens atingido. Remova imagens sem uso antes de enviar novas.'
-      );
-    }
-
-    const id = crypto.randomUUID();
-    const added = await pool.query(
-      `INSERT INTO guild_images(id,digest,content_type,data)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT(digest) DO UPDATE SET digest=EXCLUDED.digest
-       RETURNING id`,
-      [id, digest, type, bytes]
-    );
-
-    res.json({ image: '/api/images/' + added.rows[0].id });
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.get('/api/images/:id', async (req, res, next) => {
-  try {
-    if (!/^[a-f0-9-]{36}$/.test(req.params.id)) {
-      throw fail(404, 'Imagem não encontrada.');
-    }
-
-    const row = (
-      await pool.query(
-        'SELECT content_type,data FROM guild_images WHERE id=$1',
-        [req.params.id]
-      )
-    ).rows[0];
-
-    if (!row) throw fail(404, 'Imagem não encontrada.');
-
-    res.type(row.content_type).send(row.data);
-  } catch (e) {
-    next(e);
-  }
-});
-
-app.use('/api', (_req, res) => {
-  res.status(404).json({ error: 'Rota não encontrada.' });
-});
-
-app.use(express.static(path.join(base, 'dist'), {
-  index: false,
-  maxAge: production ? '1h' : 0
-}));
-
-app.get(['/', '/index.html'], (_req, res) => {
-  res.set('Cache-Control', 'no-store')
-    .sendFile(path.join(base, 'dist/index.html'));
-});
-
-app.use((err, req, res, _next) => {
-  const status = err instanceof GuildError ? err.status : err.status || 500;
-  const message = status < 500
-    ? err.message
-    : 'Não foi possível concluir agora. Tente novamente em instantes.';
-
-  if (status >= 500) {
-    console.error('Falha no serviço:', err.code || err.name);
-  }
-
-  if (req.path.startsWith('/api/')) {
-    return res.status(status).json({
-      error: status === 413 ? 'Imagem ou dados acima do limite.' : message
-    });
-  }
-
-  res.status(status).type('text/plain').send(
-    message + '\n\nVolte ao endereço do sistema para tentar novamente.'
-  );
-});
-
-async function cleanup() {
-  await pool.query('DELETE FROM guild_oauth_states WHERE expires_at<now()');
-  await pool.query('DELETE FROM guild_sessions WHERE expires_at<now()');
-
-  await pool.query(`
-    DELETE FROM guild_images i
-    WHERE i.created_at<now()-interval '1 day'
-      AND EXISTS(SELECT 1 FROM guild_state WHERE id=1)
-      AND NOT EXISTS(
-        SELECT 1 FROM guild_state s
-        WHERE s.data::text LIKE '%' || i.id::text || '%'
-      )
-      AND NOT EXISTS(
-        SELECT 1 FROM guild_fights f
-        WHERE f.data::text LIKE '%' || i.id::text || '%'
-      )
-  `);
-}
-
-try {
-  await pool.query(await readFile(path.join(base, 'schema.sql'), 'utf8'));
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS guild_fights (
-      id uuid PRIMARY KEY,
-      title text NOT NULL,
-      fight_date date NOT NULL,
-      saved_at timestamptz NOT NULL DEFAULT now(),
-      saved_by text NOT NULL,
-      data jsonb NOT NULL
-    );
-
-    CREATE INDEX IF NOT EXISTS guild_fights_date_idx
-    ON guild_fights(fight_date DESC, saved_at DESC);
-  `);
-
-  await cleanup();
-
-  const server = app.listen(
-    Number(process.env.PORT) || 3000,
-    '0.0.0.0',
-    () => console.log('WE PROFIT iniciado.')
-  );
-
-  const timer = setInterval(
-    () => cleanup().catch(() => console.error('Falha na limpeza periódica.')),
-    86400000
-  );
-
-  timer.unref();
-
-  process.on('SIGTERM', () => {
-    server.close(() => pool.end().finally(() => process.exit(0)));
-  });
-} catch (e) {
-  console.error(
-    'Falha ao iniciar banco. Confira DATABASE_URL e os logs do Neon. Código:',
-    e.code || e.name
-  );
-  process.exit(1);
-}
+          throw fail
