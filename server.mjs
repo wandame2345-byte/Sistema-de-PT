@@ -15,14 +15,9 @@ import {
 } from './security.mjs';
 
 const required = [
-  'DATABASE_URL',
-  'APP_URL',
-  'DISCORD_CLIENT_ID',
-  'DISCORD_CLIENT_SECRET',
-  'DISCORD_GUILD_ID',
-  'DISCORD_MEMBER_ROLE_ID',
-  'OWNER_DISCORD_ID',
-  'SESSION_SECRET'
+  'DATABASE_URL', 'APP_URL', 'DISCORD_CLIENT_ID',
+  'DISCORD_CLIENT_SECRET', 'DISCORD_GUILD_ID',
+  'DISCORD_MEMBER_ROLE_ID', 'OWNER_DISCORD_ID', 'SESSION_SECRET'
 ];
 
 for (const key of required) {
@@ -38,14 +33,12 @@ if (cfg.SESSION_SECRET.length < 32) {
   throw Error('SESSION_SECRET deve ter pelo menos 32 caracteres aleatórios.');
 }
 
-for (const k of [
-  'DISCORD_CLIENT_ID',
-  'DISCORD_GUILD_ID',
-  'DISCORD_MEMBER_ROLE_ID',
-  'OWNER_DISCORD_ID'
+for (const key of [
+  'DISCORD_CLIENT_ID', 'DISCORD_GUILD_ID',
+  'DISCORD_MEMBER_ROLE_ID', 'OWNER_DISCORD_ID'
 ]) {
-  if (!/^\d{17,22}$/.test(cfg[k])) {
-    throw Error('ID inválido na variável ' + k);
+  if (!/^\d{17,22}$/.test(cfg[key])) {
+    throw Error('ID inválido na variável ' + key);
   }
 }
 
@@ -58,7 +51,6 @@ if (production && !origin.startsWith('https://')) {
 
 const redirectUri = origin + '/auth/discord/callback';
 const base = path.dirname(fileURLToPath(import.meta.url));
-
 const databaseUrl = new URL(cfg.DATABASE_URL);
 
 for (const key of ['sslmode', 'sslcert', 'sslkey', 'sslrootcert']) {
@@ -76,7 +68,6 @@ const pool = new pg.Pool({
 pool.on('error', () => console.error('Conexão de banco interrompida.'));
 
 const app = express();
-
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
@@ -106,31 +97,35 @@ const cookie = age => ({
   maxAge: age
 });
 
-const hash = x => crypto.createHash('sha256').update(x).digest('hex');
+const hash = value =>
+  crypto.createHash('sha256').update(value).digest('hex');
+
 const random = () => crypto.randomBytes(32).toString('base64url');
-const fail = (status, message) => Object.assign(Error(message), { status });
+
+const fail = (status, message) =>
+  Object.assign(Error(message), { status });
 
 app.use((req, res, next) => {
   if (
     !['GET', 'HEAD', 'OPTIONS'].includes(req.method) &&
     req.headers.origin !== origin
   ) {
-    return res.status(403).json({ error: 'Origem da solicitação inválida.' });
+    return res.status(403).json({
+      error: 'Origem da solicitação inválida.'
+    });
   }
   next();
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-const authRate = rateLimit({
+app.use('/auth', rateLimit({
   windowMs: 15 * 60000,
   limit: 40,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   message: 'Muitas tentativas. Aguarde alguns minutos.'
-});
-
-app.use('/auth', authRate);
+}));
 
 async function discordFetch(url, options = {}) {
   try {
@@ -144,55 +139,71 @@ async function discordFetch(url, options = {}) {
 }
 
 async function tokens(params) {
-  const r = await discordFetch('https://discord.com/api/oauth2/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: cfg.DISCORD_CLIENT_ID,
-      client_secret: cfg.DISCORD_CLIENT_SECRET,
-      ...params
-    })
-  });
+  const response = await discordFetch(
+    'https://discord.com/api/oauth2/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: cfg.DISCORD_CLIENT_ID,
+        client_secret: cfg.DISCORD_CLIENT_SECRET,
+        ...params
+      })
+    }
+  );
 
-  if (!r.ok) {
+  if (!response.ok) {
     throw fail(
-      r.status === 429 || r.status >= 500 ? 503 : 401,
+      response.status === 429 || response.status >= 500 ? 503 : 401,
       'Não foi possível validar o login. Tente entrar com Discord novamente.'
     );
   }
 
-  const t = await r.json();
+  const data = await response.json();
 
-  if (!t.access_token || !t.refresh_token || !Number.isFinite(t.expires_in)) {
+  if (
+    !data.access_token ||
+    !data.refresh_token ||
+    !Number.isFinite(data.expires_in)
+  ) {
     throw fail(503, 'Resposta de login inválida.');
   }
 
-  return t;
+  return data;
 }
 
 async function checkMember(access) {
-  const r = await discordFetch(
+  const response = await discordFetch(
     'https://discord.com/api/v10/users/@me/guilds/' +
       cfg.DISCORD_GUILD_ID + '/member',
     { headers: { Authorization: 'Bearer ' + access } }
   );
 
-  if (r.status === 401) {
+  if (response.status === 401) {
     throw fail(401, 'Sua autorização expirou. Entre com Discord novamente.');
   }
 
-  if (r.status === 403 || r.status === 404) {
-    throw fail(403, 'Acesso negado: entre no servidor da guild e obtenha o cargo Membro.');
+  if (response.status === 403 || response.status === 404) {
+    throw fail(
+      403,
+      'Acesso negado: entre no servidor da guild e obtenha o cargo Membro.'
+    );
   }
 
-  if (!r.ok) {
-    throw fail(503, 'Não foi possível verificar seu cargo no Discord. Tente novamente.');
+  if (!response.ok) {
+    throw fail(
+      503,
+      'Não foi possível verificar seu cargo no Discord. Tente novamente.'
+    );
   }
 
-  const member = await r.json();
+  const member = await response.json();
 
   if (!memberAllowed(member, cfg.DISCORD_MEMBER_ROLE_ID)) {
-    throw fail(403, 'Acesso negado: você precisa do cargo Membro no servidor da guild.');
+    throw fail(
+      403,
+      'Acesso negado: você precisa do cargo Membro no servidor da guild.'
+    );
   }
 
   return member;
@@ -222,8 +233,8 @@ app.get('/auth/discord', async (req, res, next) => {
     });
 
     res.redirect('https://discord.com/oauth2/authorize?' + params);
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -235,12 +246,16 @@ app.get('/auth/discord/callback', async (req, res, next) => {
       throw fail(400, 'Login cancelado. Volte ao sistema para tentar novamente.');
     }
 
-    const state = String(req.query.state || '');
+    const oauthState = String(req.query.state || '');
     const browserState = String(req.cookies.guild_oauth || '');
 
     res.clearCookie('guild_oauth', cookie(0));
 
-    if (!state || state.length > 200 || state !== browserState) {
+    if (
+      !oauthState ||
+      oauthState.length > 200 ||
+      oauthState !== browserState
+    ) {
       throw fail(400, 'Login expirado ou inválido. Comece novamente.');
     }
 
@@ -249,7 +264,7 @@ app.get('/auth/discord/callback', async (req, res, next) => {
         `DELETE FROM guild_oauth_states
          WHERE id=$1 AND expires_at>now()
          RETURNING return_to`,
-        [hash(state)]
+        [hash(oauthState)]
       )
     ).rows[0];
 
@@ -257,7 +272,7 @@ app.get('/auth/discord/callback', async (req, res, next) => {
       throw fail(400, 'Login expirado. Comece novamente.');
     }
 
-    const t = await tokens({
+    const token = await tokens({
       grant_type: 'authorization_code',
       code: req.query.code,
       redirect_uri: redirectUri
@@ -265,7 +280,7 @@ app.get('/auth/discord/callback', async (req, res, next) => {
 
     const userResponse = await discordFetch(
       'https://discord.com/api/v10/users/@me',
-      { headers: { Authorization: 'Bearer ' + t.access_token } }
+      { headers: { Authorization: 'Bearer ' + token.access_token } }
     );
 
     if (!userResponse.ok) {
@@ -278,7 +293,7 @@ app.get('/auth/discord/callback', async (req, res, next) => {
       throw fail(401, 'Conta do Discord inválida.');
     }
 
-    const member = await checkMember(t.access_token);
+    const member = await checkMember(token.access_token);
     const sid = random();
 
     await pool.query(
@@ -291,17 +306,17 @@ app.get('/auth/discord/callback', async (req, res, next) => {
         user.id,
         member.nick || user.global_name || user.username,
         encryptTokens({
-          access: t.access_token,
-          refresh: t.refresh_token
+          access: token.access_token,
+          refresh: token.refresh_token
         }, cfg.SESSION_SECRET),
-        new Date(Date.now() + t.expires_in * 1000)
+        new Date(Date.now() + token.expires_in * 1000)
       ]
     );
 
     res.cookie('guild_session', sid, cookie(7 * 86400000));
     res.redirect(row.return_to);
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -316,8 +331,8 @@ app.get('/auth/logout', async (req, res, next) => {
 
     res.clearCookie('guild_session', cookie(0));
     res.redirect('/');
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -356,24 +371,25 @@ async function verifySession(sid) {
       if (!row) throw fail(401, 'Entre com Discord para acessar.');
 
       if (Date.now() - new Date(row.membership_checked_at).getTime() >= 60000) {
-        let t = decryptTokens(row.token_data, cfg.SESSION_SECRET);
+        let token = decryptTokens(row.token_data, cfg.SESSION_SECRET);
 
         if (new Date(row.token_expires_at).getTime() < Date.now() + 60000) {
           const fresh = await tokens({
             grant_type: 'refresh_token',
-            refresh_token: t.refresh
+            refresh_token: token.refresh
           });
 
-          t = {
+          token = {
             access: fresh.access_token,
             refresh: fresh.refresh_token
           };
 
-          row.token_data = encryptTokens(t, cfg.SESSION_SECRET);
-          row.token_expires_at = new Date(Date.now() + fresh.expires_in * 1000);
+          row.token_data = encryptTokens(token, cfg.SESSION_SECRET);
+          row.token_expires_at =
+            new Date(Date.now() + fresh.expires_in * 1000);
         }
 
-        await checkMember(t.access);
+        await checkMember(token.access);
 
         await client.query(
           `UPDATE guild_sessions
@@ -385,14 +401,14 @@ async function verifySession(sid) {
 
       await client.query('COMMIT');
       return row;
-    } catch (e) {
+    } catch (error) {
       await client.query('ROLLBACK');
 
-      if (e.status === 401 || e.status === 403) {
+      if (error.status === 401 || error.status === 403) {
         await client.query('DELETE FROM guild_sessions WHERE id=$1', [sid]);
       }
 
-      throw e;
+      throw error;
     } finally {
       client.release();
       locks.delete(sid);
@@ -422,11 +438,11 @@ app.use('/api', async (req, res, next) => {
     };
 
     next();
-  } catch (e) {
-    if (e.status === 401 || e.status === 403) {
+  } catch (error) {
+    if (error.status === 401 || error.status === 403) {
       res.clearCookie('guild_session', cookie(0));
     }
-    next(e);
+    next(error);
   }
 });
 
@@ -461,7 +477,7 @@ app.get('/api/guild', async (req, res, next) => {
       return res.json({ setup: true, me: req.actor });
     }
 
-    const p = permissions(row.data, req.actor);
+    const access = permissions(row.data, req.actor);
 
     res.json({
       setup: false,
@@ -469,20 +485,20 @@ app.get('/api/guild', async (req, res, next) => {
       guild: {
         ...row.data,
         owner: '',
-        staff: p.owner ? row.data.staff : []
+        staff: access.owner ? row.data.staff : []
       },
-      permissions: p,
+      permissions: access,
       me: req.actor
     });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
 function requireStaff(data, actor) {
-  const p = permissions(data, actor);
+  const access = permissions(data, actor);
 
-  if (!p.owner && !p.staff) {
+  if (!access.owner && !access.staff) {
     throw fail(403, 'Somente a staff e o dono podem gerenciar lutas.');
   }
 }
@@ -492,11 +508,11 @@ function validDate(value) {
     throw fail(400, 'Data inválida.');
   }
 
-  const d = new Date(value + 'T12:00:00Z');
+  const date = new Date(value + 'T12:00:00Z');
 
   if (
-    !Number.isFinite(d.getTime()) ||
-    d.toISOString().slice(0, 10) !== value ||
+    !Number.isFinite(date.getTime()) ||
+    date.toISOString().slice(0, 10) !== value ||
     Number(value.slice(0, 4)) < 1900
   ) {
     throw fail(400, 'Data inválida.');
@@ -509,8 +525,8 @@ function clearCall(data) {
   return {
     ...data,
     signups: [],
-    builds: data.builds.map(b => ({
-      ...b,
+    builds: data.builds.map(build => ({
+      ...build,
       player: '',
       signupId: '',
       confirmed: false,
@@ -531,8 +547,7 @@ function fightSummary(row) {
 }
 
 const fightFields = `
-  id,
-  title,
+  id, title,
   to_char(fight_date, 'YYYY-MM-DD') AS fight_date,
   saved_at,
   (
@@ -543,8 +558,6 @@ const fightFields = `
   jsonb_array_length(data->'signups') AS signups
 `;
 
-// Ranking disponível para todos os membros autenticados.
-// Cada jogador conta somente uma vez por luta salva.
 app.get('/api/attendance', async (req, res, next) => {
   try {
     if (!await state()) {
@@ -559,29 +572,28 @@ app.get('/api/attendance', async (req, res, next) => {
     }
 
     const rows = await pool.query(
-      `SELECT
-        id,
-        title,
+      `SELECT id, title,
         to_char(fight_date, 'YYYY-MM-DD') AS fight_date,
         (
           SELECT coalesce(
-            jsonb_agg(
-              jsonb_build_object(
-                'player', b->>'player',
-                'signupId', b->>'signupId',
-                'party', b->>'party'
-              )
-            ),
+            jsonb_agg(jsonb_build_object(
+              'player', b->>'player',
+              'signupId', b->>'signupId',
+              'party', b->>'party',
+              'build', b->>'name',
+              'weapon', b->'gear'->0->>'name',
+              'image', b->'gear'->0->>'image'
+            )),
             '[]'::jsonb
           )
           FROM jsonb_array_elements(data->'builds') b
           WHERE btrim(coalesce(b->>'player','')) <> ''
             AND coalesce(b->>'example','false') <> 'true'
         ) AS players
-      FROM guild_fights
-      WHERE ($1::date IS NULL OR fight_date >= $1::date)
-        AND ($2::date IS NULL OR fight_date <= $2::date)
-      ORDER BY fight_date DESC, saved_at DESC, id DESC`,
+       FROM guild_fights
+       WHERE ($1::date IS NULL OR fight_date >= $1::date)
+         AND ($2::date IS NULL OR fight_date <= $2::date)
+       ORDER BY fight_date DESC, saved_at DESC, id DESC`,
       [start, end]
     );
 
@@ -590,21 +602,30 @@ app.get('/api/attendance', async (req, res, next) => {
     for (const fight of rows.rows) {
       const present = new Map();
 
-      for (const b of fight.players) {
-        const name = b.player.trim();
-
-        const key = b.signupId
-          ? 'id:' + b.signupId
+      for (const build of fight.players) {
+        const name = build.player.trim();
+        const key = build.signupId
+          ? 'id:' + build.signupId
           : 'name:' + name.normalize('NFKC').toLowerCase();
 
         if (!present.has(key)) {
           present.set(key, {
             name,
-            parties: new Set()
+            parties: new Set(),
+            weapons: new Map()
           });
         }
 
-        present.get(key).parties.add(b.party || 'Sem PT');
+        const participant = present.get(key);
+        participant.parties.add(build.party || 'Sem PT');
+
+        const weapon = {
+          name: build.weapon || build.build || 'Arma não informada',
+          image: build.image || '',
+          party: build.party || 'Sem PT'
+        };
+
+        participant.weapons.set(JSON.stringify(weapon), weapon);
       }
 
       for (const [key, person] of present) {
@@ -620,7 +641,8 @@ app.get('/api/attendance', async (req, res, next) => {
           id: fight.id,
           title: fight.title,
           date: fight.fight_date,
-          parties: [...person.parties].sort()
+          parties: [...person.parties].sort(),
+          weapons: [...person.weapons.values()]
         });
       }
     }
@@ -634,29 +656,24 @@ app.get('/api/attendance', async (req, res, next) => {
     let position = 0;
     let previous = -1;
 
-    const result = ranking.map((person, index) => {
-      const count = person.fights.length;
-
-      if (count !== previous) {
-        position = index + 1;
-      }
-
-      previous = count;
-
-      return {
-        name: person.name,
-        position,
-        count,
-        fights: person.fights
-      };
-    });
-
     res.json({
       totalFights: rows.rows.length,
-      ranking: result
+      ranking: ranking.map((person, index) => {
+        const count = person.fights.length;
+        if (count !== previous) position = index + 1;
+        previous = count;
+
+        return {
+          key: person.key,
+          name: person.name,
+          position,
+          count,
+          fights: person.fights
+        };
+      })
     });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -674,11 +691,8 @@ app.get('/api/fights', async (req, res, next) => {
     const page = Number(req.query.page || 0);
 
     if (
-      title.length > 120 ||
-      player.length > 60 ||
-      !Number.isInteger(page) ||
-      page < 0 ||
-      page > 100000
+      title.length > 120 || player.length > 60 ||
+      !Number.isInteger(page) || page < 0 || page > 100000
     ) {
       throw fail(400, 'Filtro inválido.');
     }
@@ -694,13 +708,11 @@ app.get('/api/fights', async (req, res, next) => {
       AND (
         $4::text = '' OR
         EXISTS(
-          SELECT 1
-          FROM jsonb_array_elements(data->'builds') b
+          SELECT 1 FROM jsonb_array_elements(data->'builds') b
           WHERE strpos(lower(coalesce(b->>'player','')),lower($4)) > 0
         ) OR
         EXISTS(
-          SELECT 1
-          FROM jsonb_array_elements(data->'signups') s
+          SELECT 1 FROM jsonb_array_elements(data->'signups') s
           WHERE strpos(lower(coalesce(s->>'name','')),lower($4)) > 0
         )
       )
@@ -715,8 +727,7 @@ app.get('/api/fights', async (req, res, next) => {
 
     const rows = await pool.query(
       `SELECT ${fightFields}
-       FROM guild_fights
-       ${where}
+       FROM guild_fights ${where}
        ORDER BY fight_date DESC, saved_at DESC, id DESC
        LIMIT 20 OFFSET $5`,
       [...args, page * 20]
@@ -726,8 +737,8 @@ app.get('/api/fights', async (req, res, next) => {
       fights: rows.rows.map(fightSummary),
       total: Number(count.rows[0].total)
     });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -752,8 +763,8 @@ app.get('/api/fights/:id', async (req, res, next) => {
     if (!row) throw fail(404, 'Luta não encontrada.');
 
     res.json({ ...fightSummary(row), data: row.data });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -761,16 +772,16 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
   let client;
 
   try {
-    const c = req.body;
+    const command = req.body;
 
-    if (!c || typeof c !== 'object' || Array.isArray(c)) {
+    if (!command || typeof command !== 'object' || Array.isArray(command)) {
       throw fail(400, 'Solicitação inválida.');
     }
 
     client = await pool.connect();
     await client.query('BEGIN');
 
-    if (c.type === 'setup') {
+    if (command.type === 'setup') {
       if (req.actor.id !== cfg.OWNER_DISCORD_ID) {
         throw fail(403, 'Somente o dono configurado pode ativar a guild.');
       }
@@ -778,8 +789,7 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
       const inserted = await client.query(
         `INSERT INTO guild_state(id,revision,data)
          VALUES(1,1,$1)
-         ON CONFLICT(id) DO NOTHING
-         RETURNING id`,
+         ON CONFLICT(id) DO NOTHING RETURNING id`,
         [seed(cfg.OWNER_DISCORD_ID)]
       );
 
@@ -798,13 +808,93 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
       row.data.owner = cfg.OWNER_DISCORD_ID;
       let data;
 
-      if (c.type === 'fight-save' || c.type === 'call-clear') {
+      if (
+        command.type === 'fight-delete' ||
+        command.type === 'fight-participant-remove'
+      ) {
         requireStaff(row.data, req.actor);
 
-        if (c.type === 'fight-save') {
+        if (command.revision !== row.revision) {
+          throw fail(409, 'O histórico mudou. Atualize e tente novamente.');
+        }
+
+        if (
+          typeof command.fightId !== 'string' ||
+          !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(command.fightId)
+        ) {
+          throw fail(400, 'Identificador da luta inválido.');
+        }
+
+        const fight = (
+          await client.query(
+            'SELECT data FROM guild_fights WHERE id=$1 FOR UPDATE',
+            [command.fightId]
+          )
+        ).rows[0];
+
+        if (!fight) {
+          throw fail(404, 'Luta não encontrada. Atualize o histórico.');
+        }
+
+        if (command.type === 'fight-delete') {
+          await client.query(
+            'DELETE FROM guild_fights WHERE id=$1',
+            [command.fightId]
+          );
+        } else {
           if (
-            typeof c.requestId !== 'string' ||
-            !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(c.requestId)
+            typeof command.playerKey !== 'string' ||
+            command.playerKey.length > 260 ||
+            !/^(id:|name:).+/.test(command.playerKey)
+          ) {
+            throw fail(400, 'Jogador inválido.');
+          }
+
+          const playerKey = build => build.signupId
+            ? 'id:' + build.signupId
+            : 'name:' + build.player.trim().normalize('NFKC').toLowerCase();
+
+          const matches = build =>
+            !!build.player && playerKey(build) === command.playerKey;
+
+          if (!fight.data.builds.some(matches)) {
+            throw fail(404, 'Esta participação não existe mais.');
+          }
+
+          const saved = {
+            ...fight.data,
+            builds: fight.data.builds.map(build => matches(build) ? {
+              ...build,
+              player: '',
+              signupId: '',
+              confirmed: false,
+              example: false
+            } : build),
+            signups: fight.data.signups.filter(signup =>
+              command.playerKey.startsWith('id:')
+                ? 'id:' + signup.id !== command.playerKey
+                : 'name:' + signup.name.trim().normalize('NFKC').toLowerCase()
+                  !== command.playerKey
+            )
+          };
+
+          await client.query(
+            'UPDATE guild_fights SET data=$2 WHERE id=$1',
+            [command.fightId, saved]
+          );
+        }
+
+        data = row.data;
+      } else if (
+        command.type === 'fight-save' ||
+        command.type === 'call-clear'
+      ) {
+        requireStaff(row.data, req.actor);
+
+        if (command.type === 'fight-save') {
+          if (
+            typeof command.requestId !== 'string' ||
+            !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(command.requestId)
           ) {
             throw fail(400, 'Identificador da luta inválido.');
           }
@@ -812,7 +902,7 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
           const existing = (
             await client.query(
               'SELECT saved_by FROM guild_fights WHERE id=$1',
-              [c.requestId]
+              [command.requestId]
             )
           ).rows[0];
 
@@ -826,27 +916,30 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
           }
         }
 
-        if (c.revision !== row.revision) {
-          throw fail(409, 'A convocação mudou. Confira os jogadores e tente novamente.');
+        if (command.revision !== row.revision) {
+          throw fail(
+            409,
+            'A convocação mudou. Confira os jogadores e tente novamente.'
+          );
         }
 
-        if (c.type === 'fight-save') {
+        if (command.type === 'fight-save') {
           if (
-            typeof c.title !== 'string' ||
-            !c.title.trim() ||
-            c.title.length > 120
+            typeof command.title !== 'string' ||
+            !command.title.trim() ||
+            command.title.length > 120
           ) {
             throw fail(400, 'Informe um nome de até 120 caracteres para a luta.');
           }
 
-          if (typeof c.reset !== 'boolean') {
+          if (typeof command.reset !== 'boolean') {
             throw fail(400, 'Opção de limpeza inválida.');
           }
 
-          const date = validDate(c.date);
+          const date = validDate(command.date);
 
           if (
-            !row.data.builds.some(b => b.player) &&
+            !row.data.builds.some(build => build.player) &&
             !row.data.signups.length
           ) {
             throw fail(400, 'Não há jogadores ou inscrições para salvar.');
@@ -861,19 +954,25 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
           await client.query(
             `INSERT INTO guild_fights(id,title,fight_date,saved_by,data)
              VALUES($1,$2,$3,$4,$5)`,
-            [c.requestId, c.title.trim(), date, req.actor.id, snapshot]
+            [
+              command.requestId,
+              command.title.trim(),
+              date,
+              req.actor.id,
+              snapshot
+            ]
           );
 
-          data = c.reset ? clearCall(row.data) : row.data;
+          data = command.reset ? clearCall(row.data) : row.data;
         } else {
           data = clearCall(row.data);
         }
       } else {
-        if (c.revision !== row.revision) {
+        if (command.revision !== row.revision) {
           throw fail(409, 'Outra alteração foi salva. Atualize e tente novamente.');
         }
 
-        data = applyCommand(row.data, c, req.actor);
+        data = applyCommand(row.data, command, req.actor);
       }
 
       await client.query(
@@ -884,9 +983,9 @@ app.post('/api/guild', express.json({ limit: '200kb' }), async (req, res, next) 
 
     await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) {
+  } catch (error) {
     if (client) await client.query('ROLLBACK');
-    next(e);
+    next(error);
   } finally {
     client?.release();
   }
@@ -904,19 +1003,24 @@ app.post('/api/images', express.raw({
     }
 
     const bytes = req.body;
-
     if (!Buffer.isBuffer(bytes)) throw fail(400, 'Imagem inválida.');
 
-    const sig = bytes.subarray(0, 12).toString('latin1');
+    const signature = bytes.subarray(0, 12).toString('latin1');
     let type = '';
 
-    if (bytes[0] === 137 && sig.slice(1, 4) === 'PNG') {
+    if (bytes[0] === 137 && signature.slice(1, 4) === 'PNG') {
       type = 'image/png';
     } else if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
       type = 'image/jpeg';
-    } else if (sig.startsWith('GIF87a') || sig.startsWith('GIF89a')) {
+    } else if (
+      signature.startsWith('GIF87a') ||
+      signature.startsWith('GIF89a')
+    ) {
       type = 'image/gif';
-    } else if (sig.startsWith('RIFF') && sig.slice(8, 12) === 'WEBP') {
+    } else if (
+      signature.startsWith('RIFF') &&
+      signature.slice(8, 12) === 'WEBP'
+    ) {
       type = 'image/webp';
     }
 
@@ -944,18 +1048,17 @@ app.post('/api/images', express.raw({
       );
     }
 
-    const id = crypto.randomUUID();
     const added = await pool.query(
       `INSERT INTO guild_images(id,digest,content_type,data)
        VALUES($1,$2,$3,$4)
        ON CONFLICT(digest) DO UPDATE SET digest=EXCLUDED.digest
        RETURNING id`,
-      [id, digest, type, bytes]
+      [crypto.randomUUID(), digest, type, bytes]
     );
 
     res.json({ image: '/api/images/' + added.rows[0].id });
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -975,8 +1078,8 @@ app.get('/api/images/:id', async (req, res, next) => {
     if (!row) throw fail(404, 'Imagem não encontrada.');
 
     res.type(row.content_type).send(row.data);
-  } catch (e) {
-    next(e);
+  } catch (error) {
+    next(error);
   }
 });
 
@@ -994,14 +1097,17 @@ app.get(['/', '/index.html'], (_req, res) => {
     .sendFile(path.join(base, 'dist/index.html'));
 });
 
-app.use((err, req, res, _next) => {
-  const status = err instanceof GuildError ? err.status : err.status || 500;
+app.use((error, req, res, _next) => {
+  const status = error instanceof GuildError
+    ? error.status
+    : error.status || 500;
+
   const message = status < 500
-    ? err.message
+    ? error.message
     : 'Não foi possível concluir agora. Tente novamente em instantes.';
 
   if (status >= 500) {
-    console.error('Falha no serviço:', err.code || err.name);
+    console.error('Falha no serviço:', error.code || error.name);
   }
 
   if (req.path.startsWith('/api/')) {
@@ -1069,10 +1175,10 @@ try {
   process.on('SIGTERM', () => {
     server.close(() => pool.end().finally(() => process.exit(0)));
   });
-} catch (e) {
+} catch (error) {
   console.error(
     'Falha ao iniciar banco. Confira DATABASE_URL e os logs do Neon. Código:',
-    e.code || e.name
+    error.code || error.name
   );
   process.exit(1);
 }
