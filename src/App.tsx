@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import FightHistory from './FightHistory';
+import AttendanceRanking from './AttendanceRanking';
 import {
   Swords, Shield, Users, Settings, ImagePlus, ArrowLeft, Plus,
   MoveRight, Trash2, Check, Copy, LogOut, ChevronUp, ChevronDown,
@@ -406,6 +407,8 @@ export default function Home() {
           act={act}
         />
       )}
+
+      <AttendanceRanking revision={snapshot.revision} />
 
       <main>
         {view === 'board' && (
